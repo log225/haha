@@ -9,6 +9,7 @@
         <option name="modules">
           <set>
             <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/androidasync-2.2.1" />
             <option value="$PROJECT_DIR$/app" />
           </set>
         </option>

@@ -1,11 +1,13 @@
 package cn.iotguard.phonecontroller;
 
+import android.annotation.SuppressLint;
 import android.graphics.Bitmap;
 import android.graphics.Matrix;
 import android.hardware.input.InputManager;
 import android.os.Build;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.support.annotation.RequiresApi;
 import android.support.v4.view.InputDeviceCompat;
 import android.view.InputEvent;
 import android.view.MotionEvent;
@@ -18,8 +20,11 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Method;
+import java.util.Map;
+import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Created by caowentao on 2016/11/23.
@@ -45,11 +50,16 @@ public class Main {
     private static Timer sTimer;
     private static boolean sViewerIsAlive;
     private static boolean sThreadKeepRunning;
+    private static volatile int currentPointerNumber = 0;
+    private static Map<Integer,Integer> pointerIds = new ConcurrentHashMap<>();
+    private static Map<Integer, MotionEvent.PointerCoords> pointerCoordsMap = new ConcurrentHashMap<>();
 
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN)
+    @SuppressLint("PrivateApi")
     public static void main(String[] args) {
         Looper.prepare();
         System.out.println("PhoneController start...");
-        sTimer = new Timer();
+//        sTimer = new Timer();
         try {
             sInputManager = (InputManager) InputManager.class.getDeclaredMethod("getInstance").invoke(null);
             sInjectInputEventMethod = InputManager.class.getMethod("injectInputEvent", InputEvent.class, Integer.TYPE);
@@ -70,7 +80,6 @@ public class Main {
                 sThreadKeepRunning = true;
                 sSendImageThread = new Thread(new SendScreenShotThread((webSocket)));
                 sSendImageThread.start();
-                sTimer.schedule(new SendScreenShotThreadWatchDog(), 5000, 5000);
                 webSocket.setStringCallback(new WebSocket.StringCallback() {
                     @Override
                     public void onStringAvailable(String s) {
@@ -78,24 +87,85 @@ public class Main {
                             JSONObject event = new JSONObject(s);
                             String eventType = event.getString(KEY_EVENT_TYPE);
                             switch (eventType) {
-                                case KEY_FINGER_DOWN:
-                                    float x = event.getInt("x") * (BASE_WIDTH / sPictureWidth);
-                                    float y = event.getInt("y") * (BASE_WIDTH / sPictureWidth);
-                                    injectMotionEvent(InputDeviceCompat.SOURCE_TOUCHSCREEN, 0,
+                                case KEY_FINGER_DOWN: {
+                                    currentPointerNumber++;
+                                    pointerIds.put(currentPointerNumber, currentPointerNumber);
+                                    float x = event.getInt("x");
+                                    float y = event.getInt("y");
+                                    int index = event.getInt("index");
+                                    MotionEvent.PointerCoords ss = new MotionEvent.PointerCoords();
+                                    ss.setAxisValue(MotionEvent.AXIS_X, x);
+                                    ss.setAxisValue(MotionEvent.AXIS_Y, y);
+                                    pointerCoordsMap.put(index, ss);
+                                    int action;
+                                    switch (currentPointerNumber) {
+                                        case 1:
+                                            action = 0;
+                                            break;
+                                        case 2:
+                                            action = 261;
+                                            break;
+                                        case 3:
+                                            action = 517;
+                                            break;
+                                        default:
+                                            action = 0;
+                                            break;
+                                    }
+                                    System.out.println("receive down " + action + "current pointer number = " + currentPointerNumber);
+                                    injectMotionEvent(InputDeviceCompat.SOURCE_TOUCHSCREEN, action,
                                             SystemClock.uptimeMillis(), x, y, 1.0f);
-                                    break;
-                                case KEY_FINGER_UP:
-                                    x = event.getInt("x") * (BASE_WIDTH / sPictureWidth);
-                                    y = event.getInt("y") * (BASE_WIDTH / sPictureWidth);
-                                    injectMotionEvent(InputDeviceCompat.SOURCE_TOUCHSCREEN, 1,
+                                }
+                                break;
+                                case KEY_FINGER_UP: {
+                                    float x = event.getInt("x");
+                                    float y = event.getInt("y");
+                                    int index = event.getInt("index");  //第几个触摸事件抬起来
+                                    int action = 1;
+                                    if (index == 1) {
+                                        if (currentPointerNumber == 3) {
+                                            action = 6;
+                                        } else if (currentPointerNumber == 2) {
+                                            action = 6;
+                                        } else if (currentPointerNumber == 1) {
+                                            action = 1;
+                                        } else {
+                                            action = 1;
+                                        }
+                                    } else if (index == 2) {
+                                        if (currentPointerNumber == 3) {
+                                            action = 262;
+                                        } else if (currentPointerNumber == 2) {
+                                            action = 262;
+                                        } else {
+                                            action = 1;
+                                        }
+                                    } else if (index == 3) {
+                                        if (currentPointerNumber == 3) {
+                                            action = 518;
+                                        } else {
+                                            action = 1;
+                                        }
+                                    }
+                                    System.out.println("receive up " + action + "current pointer number = " + currentPointerNumber);
+                                    currentPointerNumber--;
+                                    pointerIds.remove(currentPointerNumber);
+                                    injectMotionEvent(InputDeviceCompat.SOURCE_TOUCHSCREEN, action,
                                             SystemClock.uptimeMillis(), x, y, 1.0f);
-                                    break;
-                                case KEY_FINGER_MOVE:
-                                    x = event.getInt("x") * (BASE_WIDTH / sPictureWidth);
-                                    y = event.getInt("y") * (BASE_WIDTH / sPictureWidth);
+                                }
+                                break;
+                                case KEY_FINGER_MOVE: {
+                                    float x = event.getInt("x");
+                                    float y = event.getInt("y");
+                                    int index = event.getInt("index");
+                                    MotionEvent.PointerCoords ss = new MotionEvent.PointerCoords();
+                                    ss.setAxisValue(MotionEvent.AXIS_X, x);
+                                    ss.setAxisValue(MotionEvent.AXIS_Y, y);
+                                    pointerCoordsMap.put(index, ss);
                                     injectMotionEvent(InputDeviceCompat.SOURCE_TOUCHSCREEN, 2,
                                             SystemClock.uptimeMillis(), x, y, 1.0f);
-                                    break;
+                                }
+                                break;
                                 case KEY_BEATHEART:
                                     sViewerIsAlive = true;
                                     break;
@@ -103,6 +173,8 @@ public class Main {
                                     sPictureWidth = event.getInt("w");
                                     sPictureHeight = event.getInt("h");
                                     sRotate = event.getInt("r");
+                                    break;
+                                default:
                                     break;
                             }
                         } catch (Exception e) {
@@ -135,6 +207,7 @@ public class Main {
 
         WebSocket mWebSocket;
         String mSurfaceName;
+
         SendScreenShotThread(WebSocket webSocket) {
             mWebSocket = webSocket;
             if (Build.VERSION.SDK_INT <= 17) {
@@ -143,6 +216,7 @@ public class Main {
                 mSurfaceName = "android.view.SurfaceControl";
             }
         }
+
         @Override
         public void run() {
             while (sThreadKeepRunning) {
@@ -168,12 +242,40 @@ public class Main {
 
     private static void injectMotionEvent(int inputSource, int action, long when, float x, float y, float pressure) {
         try {
-            MotionEvent event = MotionEvent.obtain(when, when, action, x, y, pressure, 1.0f, 0, 1.0f, 1.0f, 0, 0);
+//            static public MotionEvent obtain(long downTime, long eventTime,
+//            int action, int pointerCount, int[] pointerIds, PointerCoords[] pointerCoords,
+//            int metaState, float xPrecision, float yPrecision, int deviceId,
+//            int edgeFlags, int source, int flags) {
+            System.out.println("currentPointerNumber " + currentPointerNumber);
+            MotionEvent event = MotionEvent.obtain(when, when, action, currentPointerNumber, getInt(),create(), 0, 1.0f, 1.0f, 1, 0, inputSource, 1);
             event.setSource(inputSource);
             sInjectInputEventMethod.invoke(sInputManager, event, 0);
             event.recycle();
         } catch (Exception e) {
             System.out.println(e.getMessage());
         }
+    }
+    private static int[] getInt() {
+        Set<Integer>  keySet=  pointerIds.keySet();
+        int[] result = new int[keySet.size()];
+        int index =0;
+        for (Integer integer : keySet) {
+            result[index] = pointerIds.get(integer);
+            index++;
+        }
+        System.out.println("int[] = " + result.length);
+        return result;
+    }
+
+    private static MotionEvent.PointerCoords[] create() {
+        Set<Integer>  keySet=  pointerCoordsMap.keySet();
+        MotionEvent.PointerCoords[] result = new MotionEvent.PointerCoords[keySet.size()];
+        int index =0;
+        for (Integer integer : keySet) {
+            result[index] = pointerCoordsMap.get(integer);
+            index++;
+        }
+        System.out.println("PointerCoords[] = " + result.length);
+        return result;
     }
 }

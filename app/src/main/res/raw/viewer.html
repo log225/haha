@@ -1,138 +1,348 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <title>Android Controller</title>
-    </head>
-    <body>
-    	<button id="big">720X1280</button>
-    	<button id="small">360X640</button>
-    	<button id="rotate">旋转</button><br />
-        <canvas id="screen">
-			Your browser does not support the HTML5 canvas tag.
-		</canvas>
-    </body>
-    <script>
-    var screenFile = 'http://localhost:56789/screenshot.jpg?';
-    var ws = new WebSocket('ws://localhost:56789/input');
-    var initScreenWidth = 1280;
-    var initScreenHeight = 720;
-    var initRotate = 90;
-    var screen = document.getElementById('screen');
-    var ctx = screen.getContext("2d");
-    var shouldSendMoveEvent = false;
-    ws.onopen = function(event) {
-    	resizePicture();
-    };
-    ws.onmessage = function(event) {
-    	var blob  = new Blob([event.data], {type: "image/jpg"});
-  		var img = new Image();
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+
+<head>
+	<title>Android Controller</title>
+</head>
+
+<body oncontextmenu="forbidRight()">
+	<input type="text" id="width" value="1440"> x
+	<input type="text" id="height" value="2560" />
+	<button id="rotate">Rotate</button>
+	<button id="set_wasd">WASD</button>
+	<button id="set_mouse_left">Mouse Left</button>
+	<button id="set_mouse_right">MOuse Right</button>
+	<button id="set_mouse_control">Mouse Controll</button>
+	<button id="begin">Begin</button>
+	<button id="end">End</button>
+	<br />
+	<canvas id="screen">
+		Your browser does not support the HTML5 canvas tag.
+	</canvas>
+	<script type="text/javascript">
+		document.oncontextmenu = function (e) {
+			return false;//一般点击右键会出现浏览器默认的右键菜单，写了这句代码就可以阻止该默认事件。
+		}
+		document.onclick = function (e) {
+			var e = e || window.event;
+		}
+	</script>
+</body>
+<script>
+	var screenFile = 'http://localhost:56789/screenshot.jpg?';
+	var ws = new WebSocket('ws://localhost:56789/input');
+	var initScreenWidth = 360;
+	var initScreenHeight = 640;
+	var initRotate = 0;
+	var screen = document.getElementById('screen');
+	var ctx = screen.getContext("2d");
+	var shouldSendMoveEvent = false;
+	var MODE_NONE = 0
+	var MODE_BEGIN = 1
+	var MODE_SET_WASD = 2
+	var MODE_SET_MOUSE_LEFT = 3
+	var MODE_SET_MOUSE_RIGHT = 4
+	var MODE_SET_MOUSE_CONTROLL = 5
+	var currentMode = MODE_NONE
+	var positionMap = {}
+	var scaleX = 1.0
+	var scaleY = 1.0
+
+	var currentPointerNumber = 0
+	var actionMouseIndex = -1
+	var actionWASDIndex = -1
+	var actionTap = -1
+
+	ws.onopen = function (event) {
+		resizePicture();
+	};
+
+	ws.onmessage = function (event) {
+		var blob = new Blob([event.data], {
+			type: "image/jpg"
+		});
+		var img = new Image();
 		img.onload = function (e) {
 			ctx.drawImage(img, 0, 0);
-			window.URL.revokeObjectURL(img.src);    
+			window.URL.revokeObjectURL(img.src);
 			img = null;
 		};
-		img.onerror = img.onabort = function () {    
+		img.onerror = img.onabort = function () {
 			img = null;
 		};
 		img.src = window.URL.createObjectURL(blob);
-    };
-    ws.onclose = function(event) {
-    	window.close();
-    };
-    var down = function(event) {
-        shouldSendMoveEvent = true;
-        sendFingerPosition("fingerdown", event);
-    };
-    var up = function(event) {
-    	sendFingerPosition("fingerup", event)
-        shouldSendMoveEvent = false;
-    };
-    var move = function(event) {
-        if (shouldSendMoveEvent) {
-        	sendFingerPosition("fingermove", event);
-        }
-    };
-    var sendFingerPosition = function(type, event) {
-    	var x = event.pageX - screen.offsetLeft;
-        var y = event.pageY - screen.offsetTop;
-        var lastX = x;
-        var lastY = y;
-        if (initRotate == 90) {
-        	lastX = y;
-        	lastY = initScreenWidth - x;
-        } else if (initRotate == 180) {
-        	lastX = initScreenWidth - x;
-        	lastY = initScreenHeight - y;
-        } else if (initRotate == 270) {
-        	lastX = initScreenHeight - y;
-        	lastY = x;
-        }
-        var eventjson = '{"type":"'+type+'","x":'+lastX+',"y":'+lastY+'}';
-        ws.send(eventjson);
-    };
-    var heartbeat = function() {
-    	ws.send('{"type":"beatheart"}');
-    };
+	};
+	ws.onclose = function (event) {
+		window.close();
+	};
+	var down = function (event) {
+		if (currentMode == MODE_BEGIN) {
+			console.log(event.button)
+			if (event.button == 0) {
+				justClick(positionMap.MODE_SET_MOUSE_LEFT.x * scaleX, positionMap.MODE_SET_MOUSE_LEFT.y * scaleY)
+			} else if (event.button == 2) {
+				justClick(positionMap.MODE_SET_MOUSE_RIGHT.x * scaleX, positionMap.MODE_SET_MOUSE_RIGHT.y * scaleY)
+			}
+		}
+	};
+	var up = function (event) {
+		if (currentMode == MODE_BEGIN) {
 
-    var resizeCanvas = function() {
-    	screen.width = initScreenWidth;
-    	screen.height = initScreenHeight;
-    };
+		} else if (currentMode === MODE_SET_MOUSE_CONTROLL) {
+			positionMap.MODE_SET_MOUSE_CONTROLL = {
+				"x": event.pageX - screen.offsetLeft,
+				"y": event.pageY - screen.offsetTop
+			}
+		} else if (currentMode == MODE_SET_MOUSE_LEFT) {
+			positionMap.MODE_SET_MOUSE_LEFT = {
+				"x": event.pageX - screen.offsetLeft,
+				"y": event.pageY - screen.offsetTop
+			}
+		} else if (currentMode == MODE_SET_MOUSE_RIGHT) {
+			positionMap.MODE_SET_MOUSE_RIGHT = {
+				"x": event.pageX - screen.offsetLeft,
+				"y": event.pageY - screen.offsetTop
+			}
+		} else if (currentMode == MODE_SET_WASD) {
+			positionMap.MODE_SET_WASD = {
+				"x": event.pageX - screen.offsetLeft,
+				"y": event.pageY - screen.offsetTop
+			}
+		}
+	};
 
-    var resizePicture = function() {
-    	if (initScreenWidth <= initScreenHeight) {
-    		ws.send('{"type":"change_size", "w":'+initScreenWidth+', "h":'+initScreenHeight+', "r":'+ initRotate+'}');					
-    	} else {
-    		ws.send('{"type":"change_size", "w":'+initScreenHeight+', "h":'+initScreenWidth+', "r":'+ initRotate+'}');
-    	}
-    };
+	var moveStart = false
+	var mouseX = 0.0
+	var mouseY = 0.0
+	var move = function (event) {
+		if (currentMode == MODE_BEGIN) {
+			// sendFingerPosition("fingermove", event);
+			if (!moveStart) {
+				currentPointerNumber++;
+				actionMouseIndex = currentPointerNumber
+				sendTouchEvent("fingerdown", positionMap.MODE_SET_MOUSE_CONTROLL.x * scaleX, positionMap.MODE_SET_MOUSE_CONTROLL.y * scaleY, actionMouseIndex)
+				console.log("send mouse down event XXXXXX")
+				moveStart = true
+			}
+			var distanceX = event.pageX - positionMap.MODE_SET_MOUSE_CONTROLL.x
+			var distanceY = event.pageY - positionMap.MODE_SET_MOUSE_CONTROLL.y
+			// var degree = Math.atan(distanceY / distanceX)
+			var distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY)
+			mouseX = Math.min(distance, 300) * distanceX / distance + positionMap.MODE_SET_MOUSE_CONTROLL.x * scaleX
+			mouseY = Math.min(distance, 300) * distanceY / distance + positionMap.MODE_SET_MOUSE_CONTROLL.y * scaleX
+			sendTouchEvent("fingermove", mouseX, mouseY, actionMouseIndex)
+		}
+	};
+	var sendFingerPosition = function (type, event) {
+		var x = event.pageX - screen.offsetLeft;
+		var y = event.pageY - screen.offsetTop;
+		var lastX = x;
+		var lastY = y;
+		if (type == "fingermove") {
+			console.log("move ", x, y)
+		}
+		if (initRotate == 90) {
+			lastX = y;
+			lastY = initScreenWidth - x;
+		} else if (initRotate == 180) {
+			lastX = initScreenWidth - x;
+			lastY = initScreenHeight - y;
+		} else if (initRotate == 270) {
+			lastX = initScreenHeight - y;
+			lastY = x;
+		}
+		var eventjson = '{"type":"' + type + '","x":' + lastX + ',"y":' + lastY + '}';
+		ws.send(eventjson);
+	};
 
-    var buttonHandler = function(e) {
-    	switch(e.target.id) {
-    		case "big":
-    			if (Math.abs(initScreenWidth - initScreenHeight) == 280) {
-    				if (initRotate == 90 || initRotate == 270) {
-    					initScreenWidth = 1280;
-    					initScreenHeight = 720;
-    				} else {
-    					initScreenWidth = 720;
-    					initScreenHeight = 1280;
-    				}
-    				resizePicture();
-    				resizeCanvas();
-    			}
-    			break;
-    		case "small":
-    			if (Math.abs(initScreenWidth - initScreenHeight) == 560) {
-    				if (initRotate == 90 || initRotate == 270) {
-    					initScreenWidth = 640;
-    					initScreenHeight = 360;
-    				} else {
-    					initScreenWidth = 360;
-    					initScreenHeight = 640;
-    				}
-    				resizePicture();
-    				resizeCanvas();
-    			}
-    			break;
-    		case "rotate":
-    			if (initRotate == 270) initRotate = 0;
-    			else initRotate += 90;
-    			var temp = initScreenHeight;
-    			initScreenHeight = initScreenWidth;
-    			initScreenWidth = temp;
-    			resizePicture();
-    			resizeCanvas();
-    			break;
-    	}
-    };
-    resizeCanvas();
-    screen.addEventListener('mousedown', down, false);
-    screen.addEventListener('mouseup', up, false);
-    screen.addEventListener('mousemove', move, false);
-    document.getElementById('big').addEventListener('click', buttonHandler, false);
-    document.getElementById('small').addEventListener('click', buttonHandler, false);
-    document.getElementById('rotate').addEventListener('click', buttonHandler, false);
-    setInterval("heartbeat()", 2000);
-    </script>
+	var heartbeat = function () {
+		ws.send('{"type":"beatheart"}');
+	};
+
+	var resizeCanvas = function () {
+		screen.width = initScreenWidth;
+		screen.height = initScreenHeight;
+	};
+
+	var resizePicture = function () {
+		if (initScreenWidth <= initScreenHeight) {
+			ws.send('{"type":"change_size", "w":' + initScreenWidth + ', "h":' + initScreenHeight + ', "r":' + initRotate + '}');
+		} else {
+			ws.send('{"type":"change_size", "w":' + initScreenHeight + ', "h":' + initScreenWidth + ', "r":' + initRotate + '}');
+		}
+	};
+
+	var setPosition = function (e) {
+		console.log("mouse click ", pageX, pageY)
+	};
+
+	var justClick = function (x, y) {
+		console.log("just click ", x, y)
+		currentPointerNumber++
+		actionTap = currentPointerNumber
+		sendTouchEvent("fingerdown", x, y, actionTap)
+		sendTouchEvent("fingerup", x, y, actionTap)
+		currentPointerNumber--
+	}
+
+	var sendTouchEvent = function (type, x, y, index) {
+		var eventjson = '{"type":"' + type + '","x":' + x + ',"y":' + y + ',"index":' + index + '}';
+		ws.send(eventjson);
+	}
+
+	var buttonHandler = function (e) {
+		switch (e.target.id) {
+			case "begin": {
+				currentMode = MODE_BEGIN;
+				var width = document.getElementById("width").value;
+				var height = document.getElementById("height").value;
+				console.log("find target ", width, height);
+				scaleX = width / initScreenWidth;
+				scaleY = height / initScreenHeight;
+				moveStart = false;
+				console.log("scale ", scaleX, scaleY)
+				break;
+			};
+			case "end": {
+				currentMode = MODE_NONE;
+				sendTouchEvent("fingerup", 0, 0, actionMouseIndex)
+				console.log("send mouse up event " , actionMouseIndex)
+				currentPointerNumber--
+				moveStart = false
+				break;
+			};
+			case "rotate": {
+				if (initRotate == 270)
+					initRotate = 0;
+				else initRotate += 90;
+				var temp = initScreenHeight;
+				initScreenHeight = initScreenWidth;
+				initScreenWidth = temp;
+				resizePicture();
+				resizeCanvas();
+				break;
+			};
+			case "set_wasd": {
+				currentMode = MODE_SET_WASD;
+				break;
+			};
+			case "set_mouse_left": {
+				currentMode = MODE_SET_MOUSE_LEFT;
+				break;
+			};
+			case "set_mouse_right": {
+				currentMode = MODE_SET_MOUSE_RIGHT;
+				break;
+			};
+			case "set_mouse_control": {
+				currentMode = MODE_SET_MOUSE_CONTROLL;
+				break;
+			};
+		}
+
+	};
+
+	var wPressed = false
+	var aPressed = false
+	var sPressed = false
+	var dPressed = false
+	var wasdX = 0.0
+	var wasdY = 0.0
+	// 	87  viewer.html:92
+	// key =  65  viewer.html:92
+	// key =  83  viewer.html:92
+	// key =  68
+	var onkeydown = function (event) {
+		if (currentMode == MODE_BEGIN) {
+			console.log("down ",dPressed, aPressed, sPressed, wPressed)
+			if (!dPressed && !aPressed && !sPressed && !wPressed) {
+				console.log("send wasd down event")
+				currentPointerNumber++
+				actionWASDIndex = currentPointerNumber
+				sendTouchEvent("fingerdown", positionMap.MODE_SET_WASD.x * scaleX, positionMap.MODE_SET_WASD.y * scaleY,actionWASDIndex)
+			}
+			var key = event.keyCode;
+			console.log("key = ", key)
+			if (key == 87) {    //w
+				wPressed = true
+			} else if (key == 65) {  //a
+				aPressed = true
+			} else if (key == 83) {    //s
+				sPressed = true
+			} else if (key == 68) {   //d
+				dPressed = true
+			}
+
+			var degree = 0
+			if (aPressed && wPressed) {
+				degree = 135
+			} else if (aPressed && sPressed) {
+				degree = 225
+			} else if (dPressed && wPressed) {
+				degree = 45
+			} else if (dPressed && sPressed) {
+				degree = 315
+			} else if (aPressed) {
+				degree = 180
+			} else if (wPressed) {
+				degree = 90
+			} else if (dPressed) {
+				degree = 0
+			} else if (sPressed) {
+				degree = 270
+			}
+			wasdX = 300 * Math.cos(degree / 180.0 * Math.PI) + positionMap.MODE_SET_WASD.x * scaleX
+			wasdY = -300 * Math.sin(degree / 180.0 * Math.PI) + positionMap.MODE_SET_WASD.y * scaleY
+			sendTouchEvent("fingermove", wasdX, wasdY, actionWASDIndex)
+		}
+
+	};
+
+	var onkeyup = function (event) {
+		if (currentMode == MODE_BEGIN) {
+			var key = event.keyCode;
+			console.log("key = ", key)
+			if (key == 87) {    //w
+				console.log("up w")
+				wPressed = false
+			} else if (key == 65) {  //a
+				console.log("up a")
+				aPressed = false
+			} else if (key == 83) {    //s
+				console.log("up s")
+				sPressed = false
+			} else if (key == 68) {   //d
+				console.log("up d")
+				dPressed = false
+			}
+		}
+		console.log("up ",dPressed, aPressed, sPressed, wPressed)
+		if (!dPressed && !aPressed && !sPressed && !wPressed) {
+			sendTouchEvent("fingerup", wasdX, wasdY, actionWASDIndex)
+			currentPointerNumber--
+			console.log("send wasd up event. " , actionWASDIndex)
+		}
+	};
+
+	resizeCanvas();
+	screen.addEventListener('mousedown', down, false);
+	screen.addEventListener('mouseup', up, false);
+	screen.addEventListener('mousemove', move, false);
+	screen.addEventListener('onkeydown', onkeydown, false)
+	screen.addEventListener('onkeyup', onkeydown, false)
+
+	// screen.addEventListener('click', setPosition, false);
+
+	document.getElementById('rotate').addEventListener('click', buttonHandler, false);
+	document.getElementById('begin').addEventListener('click', buttonHandler, false);
+	document.getElementById('end').addEventListener('click', buttonHandler, false);
+	document.getElementById('set_wasd').addEventListener('click', buttonHandler, false);
+	document.getElementById('set_mouse_left').addEventListener('click', buttonHandler, false);
+	document.getElementById('set_mouse_right').addEventListener('click', buttonHandler, false);
+	document.getElementById('set_mouse_control').addEventListener('click', buttonHandler, false);
+	setInterval("heartbeat()", 2000);
+</script>
+
+
 </html>
